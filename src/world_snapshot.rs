@@ -1,9 +1,13 @@
 use bevy::{
     ecs::{entity::EntityMap, reflect::ReflectMapEntities},
     prelude::*,
-    reflect::{Reflect, TypeRegistry},
+    reflect::{
+        serde::{ReflectSerializer, UntypedReflectDeserializer},
+        Reflect, TypeRegistry,
+    },
     utils::HashMap,
 };
+use erased_serde::__private::serde::de::DeserializeSeed;
 use std::{fmt::Debug, num::Wrapping};
 
 use crate::Rollback;
@@ -18,6 +22,8 @@ fn rollback_id_map(world: &mut World) -> HashMap<u32, Entity> {
     }
     rid_map
 }
+
+trait ReflectSerde: Reflect + FromReflect {}
 
 struct RollbackEntity {
     pub entity: Entity,
@@ -49,13 +55,125 @@ impl Debug for RollbackEntity {
 /// The `checksum` is the sum of hash-values from all hashable objects. It is a sum for the checksum to be order insensitive. This of course
 /// is not the best checksum to ever exist, but it is a starting point.
 #[derive(Default)]
-pub(crate) struct WorldSnapshot {
+pub struct WorldSnapshot {
     entities: Vec<RollbackEntity>,
     pub resources: Vec<Box<dyn Reflect>>,
     pub checksum: u64,
 }
 
+#[derive(Reflect, FromReflect)]
+struct RollbackEntitySerializable {
+    pub entity: Entity,
+    pub rollback_id: u32,
+    pub components: Vec<String>,
+}
+
+#[derive(Reflect, FromReflect)]
+struct WorldSnapshotSerializable {
+    entities: Vec<RollbackEntitySerializable>,
+    pub resources: Vec<String>,
+    pub checksum: u64,
+}
+
+#[test]
+fn register() {
+    let registry = TypeRegistry::default();
+    registry.write().register::<Vec3>();
+    println!("{:?}", registry.read().iter().collect::<Vec<_>>());
+    println!(
+        "{}",
+        ron::to_string(&ReflectSerializer::new(
+            &Vec3::new(1.0, 2., 3.),
+            &registry.read()
+        ))
+        .unwrap()
+    );
+}
+
 impl WorldSnapshot {
+    pub fn to_ron_string(&self, type_registry: &TypeRegistry) -> String {
+        let registry = type_registry.read();
+        let snapshot_serializable = WorldSnapshotSerializable {
+            entities: self
+                .entities
+                .iter()
+                .map(|e| RollbackEntitySerializable {
+                    entity: e.entity,
+                    rollback_id: e.rollback_id,
+                    components: e
+                        .components
+                        .iter()
+                        .map(|c| ReflectSerializer::new(&**c, &registry))
+                        .map(|s| ron::to_string(&s).unwrap())
+                        .collect(),
+                })
+                .collect(),
+            resources: self
+                .resources
+                .iter()
+                .map(|r| ReflectSerializer::new(&**r, &registry))
+                .filter_map(|s| ron::to_string(&s).ok())
+                .collect(),
+            checksum: 0,
+        };
+        let registry = TypeRegistry::default();
+        let mut writer = registry.write();
+        writer.register::<WorldSnapshotSerializable>();
+        writer.register::<Entity>();
+
+        ron::to_string(&ReflectSerializer::new(&snapshot_serializable, &writer)).unwrap()
+    }
+
+    pub fn from_ron_string(snapshot: &str, type_registry: &TypeRegistry) -> Self {
+        // use bevy::reflect::erased_serde::private::serde::de::DeserializeSeed as _;
+
+        let registry = TypeRegistry::default();
+        let mut writer = registry.write();
+        writer.register::<WorldSnapshotSerializable>();
+        writer.register::<RollbackEntitySerializable>();
+        writer.register::<Vec<RollbackEntitySerializable>>();
+        writer.register::<Vec<String>>();
+        writer.register::<Entity>();
+        let reflect_deserializer = UntypedReflectDeserializer::new(&writer);
+        let deserialized_value = reflect_deserializer
+            .deserialize(&mut ron::Deserializer::from_str(snapshot).unwrap())
+            .unwrap();
+        let snapshot_serializable =
+            <WorldSnapshotSerializable as FromReflect>::from_reflect(&*deserialized_value).unwrap();
+
+        // let snapshot_serializable = (snapshot).unwrap();
+        let registry = type_registry.read();
+        WorldSnapshot {
+            checksum: snapshot_serializable.checksum,
+            entities: snapshot_serializable
+                .entities
+                .iter()
+                .map(|e| RollbackEntity {
+                    entity: e.entity,
+                    rollback_id: e.rollback_id,
+                    components: e
+                        .components
+                        .iter()
+                        .map(|c| {
+                            UntypedReflectDeserializer::new(&registry)
+                                .deserialize(&mut ron::Deserializer::from_str(c).unwrap())
+                                .unwrap()
+                        })
+                        .collect(),
+                })
+                .collect(),
+            resources: snapshot_serializable
+                .resources
+                .iter()
+                .map(|r| {
+                    UntypedReflectDeserializer::new(&registry)
+                        .deserialize(&mut ron::Deserializer::from_str(r).unwrap())
+                        .unwrap()
+                })
+                .collect(),
+        }
+    }
+
     pub(crate) fn from_world(world: &World, type_registry: &TypeRegistry) -> Self {
         let mut snapshot = WorldSnapshot::default();
         let type_registry = type_registry.read();
@@ -133,6 +251,8 @@ impl WorldSnapshot {
     pub(crate) fn write_to_world(&self, world: &mut World, type_registry: &TypeRegistry) {
         let type_registry = type_registry.read();
         let mut rid_map = rollback_id_map(world);
+        info!("rid_map: {:?}", rid_map);
+        info!("entities: {:?}", self.entities);
 
         // Mapping of the old entity ids ( when snapshot was taken ) to new entity ids
         let mut entity_map = EntityMap::default();

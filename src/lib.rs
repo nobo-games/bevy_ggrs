@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 pub use ggrs;
 
-pub(crate) mod ggrs_stage;
+pub mod ggrs_stage;
 pub(crate) mod world_snapshot;
+pub use world_snapshot::WorldSnapshot;
 
 const DEFAULT_FPS: usize = 60;
 
@@ -168,6 +169,20 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
 
         let registration = registry.get_mut(std::any::TypeId::of::<Type>()).unwrap();
         registration.insert(<ReflectResource as FromType<Type>>::from_type());
+        drop(registry);
+        self
+    }
+
+    /// Registers a type of resource for saving and loading during rollbacks.
+    pub fn register_type_dependency<Type>(self) -> Self
+    where
+        Type: GetTypeRegistration + Reflect + Default,
+    {
+        let mut registry = self.type_registry.write();
+        registry.register::<Type>();
+
+        // let registration = registry.get_mut(std::any::TypeId::of::<Type>()).unwrap();
+        // registration.insert(<ReflectResource as FromType<Type>>::from_type());
         drop(registry);
         self
     }

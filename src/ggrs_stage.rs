@@ -7,7 +7,7 @@ use instant::{Duration, Instant};
 
 #[derive(Resource)]
 /// The GGRSStage handles updating, saving and loading the game state.
-pub(crate) struct GGRSStage<T>
+pub struct GGRSStage<T>
 where
     T: Config,
 {
@@ -211,6 +211,15 @@ impl<T: Config> GGRSStage<T> {
                 GGRSRequest::AdvanceFrame { inputs } => self.advance_frame(inputs, world),
             }
         }
+    }
+
+    pub fn get_serialized_snapshot(&self, world: &World) -> String {
+        WorldSnapshot::from_world(world, &self.type_registry).to_ron_string(&self.type_registry)
+    }
+
+    pub fn load_serialized_snapshot(&self, world: &mut World, snapshot: &str) {
+        WorldSnapshot::from_ron_string(snapshot, &self.type_registry)
+            .write_to_world(world, &self.type_registry);
     }
 
     pub(crate) fn save_world(
