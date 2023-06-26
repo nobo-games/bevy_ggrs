@@ -251,8 +251,6 @@ impl WorldSnapshot {
     pub(crate) fn write_to_world(&self, world: &mut World, type_registry: &TypeRegistry) {
         let type_registry = type_registry.read();
         let mut rid_map = rollback_id_map(world);
-        info!("rid_map: {:?}", rid_map);
-        info!("entities: {:?}", self.entities);
 
         // Mapping of the old entity ids ( when snapshot was taken ) to new entity ids
         let mut entity_map = EntityMap::default();
