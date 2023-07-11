@@ -205,7 +205,7 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         app.add_schedule(GGRSSchedule, schedule);
 
         stage.set_type_registry(self.type_registry);
-        app.add_system(GGRSStage::<T>::run.in_base_set(CoreSet::PreUpdate));
+        app.add_systems(PreUpdate, GGRSStage::<T>::run);
         app.insert_resource(stage);
         // other resources
         app.insert_resource(RollbackIdProvider::default());

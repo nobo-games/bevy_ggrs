@@ -7,7 +7,7 @@ use bevy::{
     },
     utils::HashMap,
 };
-use erased_serde::__private::serde::de::DeserializeSeed;
+use erased_serde::private::serde::de::DeserializeSeed;
 use std::{fmt::Debug, num::Wrapping};
 
 use crate::Rollback;
@@ -61,14 +61,14 @@ pub struct WorldSnapshot {
     pub checksum: u64,
 }
 
-#[derive(Reflect, FromReflect)]
+#[derive(Reflect)]
 struct RollbackEntitySerializable {
     pub entity: Entity,
     pub rollback_id: u32,
     pub components: Vec<String>,
 }
 
-#[derive(Reflect, FromReflect)]
+#[derive(Reflect)]
 struct WorldSnapshotSerializable {
     entities: Vec<RollbackEntitySerializable>,
     pub resources: Vec<String>,
@@ -372,11 +372,9 @@ impl WorldSnapshot {
         // new IDs after applying the snapshot.
         for registration in type_registry.iter() {
             if let Some(map_entities_reflect) = registration.data::<ReflectMapEntities>() {
-                map_entities_reflect
-                    .map_entities(world, &entity_map)
-                    // This may fail if an entity is not found in the entity map, but that's fine,
-                    // because if it's not found in the map, then the entity may remain un-mapped.
-                    .ok();
+                map_entities_reflect.map_all_entities(world, &mut entity_map);
+                // This may fail if an entity is not found in the entity map, but that's fine,
+                // because if it's not found in the map, then the entity may remain un-mapped.
             }
         }
     }
