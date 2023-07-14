@@ -24,8 +24,8 @@ bevy = { version = "0.11", default-features = false, features = [
 bytemuck = { version = "1.7", features = ["derive"] }
 instant = "0.1"
 log = "0.4"
-ggrs = { version = "0.9.4", features = ["sync-send"] }
-#ggrs = { git = "https://github.com/gschup/ggrs", features=["sync-send"]}
+#ggrs = { version= "0.9.4", features=["sync-send"]}
+ggrs = { git = "https://github.com/gschup/ggrs", features = ["sync-send"] }
 parking_lot = "0.12.1"
 ron = "0.8"
 erased-serde = "0.3"

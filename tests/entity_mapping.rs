@@ -4,8 +4,8 @@ use bevy_ggrs::*;
 use ggrs::*;
 use instant::Duration;
 
-pub struct GGRSConfig;
-impl Config for GGRSConfig {
+pub struct GgrsConfig;
+impl Config for GgrsConfig {
     type Input = u8;
     type State = u8;
     type Address = usize;
@@ -26,15 +26,16 @@ fn input_system(_: In<PlayerHandle>, mut delete_events: EventReader<DeleteChildE
 
 fn setup_system(mut commands: Commands) {
     commands
-        .spawn((Rollback::new(0), ParentEntity))
+        .spawn(ParentEntity)
+        .add_rollback()
         .with_children(|parent| {
-            parent.spawn((Rollback::new(1), ChildEntity));
+            parent.spawn(ChildEntity).add_rollback();
         });
 }
 
 fn delete_child_system(
     mut commands: Commands,
-    inputs: Res<PlayerInputs<GGRSConfig>>,
+    inputs: Res<PlayerInputs<GgrsConfig>>,
     parent: Query<&Children, With<ParentEntity>>,
     child: Query<Entity, With<ChildEntity>>,
 ) {
@@ -73,25 +74,24 @@ fn entity_mapping() {
         .init_resource::<FrameCounter>()
         .add_systems(Startup, setup_system)
         // Insert the GGRS session
-        .insert_resource(Session::SyncTestSession(
-            SessionBuilder::<GGRSConfig>::new()
+        .insert_resource(Session::SyncTest(
+            SessionBuilder::<GgrsConfig>::new()
                 .with_num_players(1)
                 .with_check_distance(2)
                 .add_player(PlayerType::Local, 0)
                 .unwrap()
                 .start_synctest_session()
                 .unwrap(),
-        ));
-
-    GGRSPlugin::<GGRSConfig>::new()
-        .with_update_frequency(60)
-        .with_input_system(input_system)
-        .register_rollback_component::<ChildEntity>()
-        .register_rollback_component::<ParentEntity>()
-        .register_rollback_resource::<FrameCounter>()
-        .build(&mut app);
-
-    app.add_systems(GGRSSchedule, (frame_counter, delete_child_system).chain());
+        ))
+        .add_ggrs_plugin(
+            GgrsPlugin::<GgrsConfig>::new()
+                .with_update_frequency(60)
+                .with_input_system(input_system)
+                .register_rollback_component::<ChildEntity>()
+                .register_rollback_component::<ParentEntity>()
+                .register_rollback_resource::<FrameCounter>(),
+        )
+        .add_systems(GgrsSchedule, (frame_counter, delete_child_system).chain());
 
     // Sleep helper that will make sure at least one frame should be executed by the GGRS fixed
     // update loop.

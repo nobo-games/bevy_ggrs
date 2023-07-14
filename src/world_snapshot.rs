@@ -10,15 +10,15 @@ use bevy::{
 use erased_serde::private::serde::de::DeserializeSeed;
 use std::{fmt::Debug, num::Wrapping};
 
-use crate::Rollback;
+use crate::rollback::Rollback;
 
 /// Maps rollback_ids to entity id+generation. Necessary to track entities over time.
-fn rollback_id_map(world: &mut World) -> HashMap<u32, Entity> {
+fn rollback_id_map(world: &mut World) -> HashMap<Rollback, Entity> {
     let mut rid_map = HashMap::default();
     let mut query = world.query::<(Entity, &Rollback)>();
     for (entity, rollback) in query.iter(world) {
-        assert!(!rid_map.contains_key(&rollback.id));
-        rid_map.insert(rollback.id, entity);
+        assert!(!rid_map.contains_key(rollback));
+        rid_map.insert(*rollback, entity);
     }
     rid_map
 }
@@ -27,7 +27,7 @@ trait ReflectSerde: Reflect + FromReflect {}
 
 struct RollbackEntity {
     pub entity: Entity,
-    pub rollback_id: u32,
+    pub rollback_id: Rollback,
     pub components: Vec<Box<dyn Reflect>>,
 }
 
@@ -35,7 +35,7 @@ impl Default for RollbackEntity {
     fn default() -> Self {
         Self {
             entity: Entity::from_raw(0),
-            rollback_id: Default::default(),
+            rollback_id: Rollback::new(Entity::from_raw(0)),
             components: Default::default(),
         }
     }
@@ -64,7 +64,7 @@ pub struct WorldSnapshot {
 #[derive(Reflect)]
 struct RollbackEntitySerializable {
     pub entity: Entity,
-    pub rollback_id: u32,
+    pub rollback_id: Rollback,
     pub components: Vec<String>,
 }
 
@@ -186,7 +186,7 @@ impl WorldSnapshot {
                 if let Some(rollback) = world.get::<Rollback>(entity) {
                     snapshot.entities.push(RollbackEntity {
                         entity,
-                        rollback_id: rollback.id,
+                        rollback_id: *rollback,
                         components: Vec::new(),
                     });
                 }
@@ -260,13 +260,7 @@ impl WorldSnapshot {
             // find the corresponding current entity or create new entity, if it doesn't exist
             let entity = *rid_map
                 .entry(rollback_entity.rollback_id)
-                .or_insert_with(|| {
-                    world
-                        .spawn(Rollback {
-                            id: rollback_entity.rollback_id,
-                        })
-                        .id()
-                });
+                .or_insert_with(|| world.spawn(rollback_entity.rollback_id).id());
 
             // Add the mapping from the old entity ID to the new entity ID
             entity_map.insert(rollback_entity.entity, entity);
@@ -372,9 +366,7 @@ impl WorldSnapshot {
         // new IDs after applying the snapshot.
         for registration in type_registry.iter() {
             if let Some(map_entities_reflect) = registration.data::<ReflectMapEntities>() {
-                map_entities_reflect.map_all_entities(world, &mut entity_map);
-                // This may fail if an entity is not found in the entity map, but that's fine,
-                // because if it's not found in the map, then the entity may remain un-mapped.
+                map_entities_reflect.map_all_entities(world, &mut entity_map)
             }
         }
     }

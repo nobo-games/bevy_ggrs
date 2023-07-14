@@ -7,99 +7,50 @@ use bevy::{
     reflect::{FromType, GetTypeRegistration, TypeRegistry, TypeRegistryInternal},
 };
 use ggrs::{Config, InputStatus, P2PSession, PlayerHandle, SpectatorSession, SyncTestSession};
-use ggrs_stage::GGRSStage;
+use ggrs_stage::GgrsStage;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub use ggrs;
 
-pub mod ggrs_stage;
+pub use rollback::{AddRollbackCommand, AddRollbackCommandExtension, Rollback};
+
+pub(crate) mod ggrs_stage;
+pub(crate) mod rollback;
 pub(crate) mod world_snapshot;
 pub use world_snapshot::WorldSnapshot;
+
+pub mod prelude {
+    pub use crate::{
+        AddRollbackCommandExtension, GgrsPlugin, GgrsSchedule, PlayerInputs, Rollback, Session,
+    };
+}
 
 const DEFAULT_FPS: usize = 60;
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct GGRSSchedule;
+pub struct GgrsSchedule;
 
 /// Defines the Session that the GGRS Plugin should expect as a resource.
 #[derive(Resource)]
 pub enum Session<T: Config> {
-    SyncTestSession(SyncTestSession<T>),
-    P2PSession(P2PSession<T>),
-    SpectatorSession(SpectatorSession<T>),
+    SyncTest(SyncTestSession<T>),
+    P2P(P2PSession<T>),
+    Spectator(SpectatorSession<T>),
 }
 
 // TODO: more specific name to avoid conflicts?
 #[derive(Resource, Deref, DerefMut)]
 pub struct PlayerInputs<T: Config>(Vec<(T::Input, InputStatus)>);
 
-/// Add this component to all entities you want to be loaded/saved on rollback.
-/// The `id` has to be unique. Consider using the `RollbackIdProvider` resource.
-#[derive(Component)]
-pub struct Rollback {
-    id: u32,
-}
-
-impl Rollback {
-    /// Creates a new rollback tag with the given id.
-    pub fn new(id: u32) -> Self {
-        Self { id }
-    }
-
-    /// Returns the rollback id.
-    pub const fn id(&self) -> u32 {
-        self.id
-    }
-}
-
-/// Provides unique ids for your Rollback components.
-/// When you add the GGRS Plugin, this should be available as a resource.
-#[derive(Resource, Default)]
-pub struct RollbackIdProvider {
-    next_id: u32,
-}
-
-impl RollbackIdProvider {
-    /// Returns an unused, unique id.
-    pub fn next_id(&mut self) -> u32 {
-        if self.next_id == u32::MAX {
-            // TODO: do something smart?
-            panic!("RollbackIdProvider: u32::MAX has been reached.");
-        }
-        let ret = self.next_id;
-        self.next_id += 1;
-        ret
-    }
-
-    /// Returns a `Rollback` component with the next unused id
-    ///
-    /// Convenience for `Rollback::new(rollback_id_provider.next_id())`.
-    ///
-    /// ```
-    /// # use bevy::prelude::*;
-    /// use bevy_ggrs::{RollbackIdProvider};
-    ///
-    /// fn system_in_rollback_schedule(mut commands: Commands, mut rip: RollbackIdProvider) {
-    ///     commands.spawn((
-    ///         SpatialBundle::default(),
-    ///         rip.next(),
-    ///     ));
-    /// }
-    /// ```
-    pub fn next(&mut self) -> Rollback {
-        Rollback::new(self.next_id())
-    }
-}
-
 /// A builder to configure GGRS for a bevy app.
-pub struct GGRSPlugin<T: Config + Send + Sync> {
+pub struct GgrsPlugin<T: Config + Send + Sync> {
     input_system: Option<Box<dyn System<In = PlayerHandle, Out = T::Input>>>,
     fps: usize,
     type_registry: TypeRegistry,
 }
 
-impl<T: Config + Send + Sync> Default for GGRSPlugin<T> {
+impl<T: Config + Send + Sync> Default for GgrsPlugin<T> {
     fn default() -> Self {
         Self {
             input_system: None,
@@ -124,7 +75,7 @@ impl<T: Config + Send + Sync> Default for GGRSPlugin<T> {
     }
 }
 
-impl<T: Config + Send + Sync> GGRSPlugin<T> {
+impl<T: Config + Send + Sync> GgrsPlugin<T> {
     /// Create a new instance of the builder.
     pub fn new() -> Self {
         Default::default()
@@ -194,7 +145,7 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
             .expect("Adding an input system through GGRSBuilder::with_input_system is required");
         // ggrs stage
         input_system.initialize(&mut app.world);
-        let mut stage = GGRSStage::<T>::new(input_system);
+        let mut stage = GgrsStage::<T>::new(input_system);
         stage.set_update_frequency(self.fps);
 
         let mut schedule = Schedule::default();
@@ -202,12 +153,28 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
             ambiguity_detection: LogLevel::Error,
             ..default()
         });
-        app.add_schedule(GGRSSchedule, schedule);
+        app.add_schedule(GgrsSchedule, schedule);
 
         stage.set_type_registry(self.type_registry);
-        app.add_systems(PreUpdate, GGRSStage::<T>::run);
+        app.add_systems(PreUpdate, GgrsStage::<T>::run);
         app.insert_resource(stage);
-        // other resources
-        app.insert_resource(RollbackIdProvider::default());
+    }
+}
+
+/// Extension trait to add the GGRS plugin idiomatically to Bevy Apps
+pub trait GgrsAppExtension {
+    /// Add a GGRS plugin to your App
+    fn add_ggrs_plugin<T: Config + Send + Sync>(&mut self, ggrs_plugin: GgrsPlugin<T>)
+        -> &mut Self;
+}
+
+impl GgrsAppExtension for App {
+    fn add_ggrs_plugin<T: Config + Send + Sync>(
+        &mut self,
+        ggrs_plugin: GgrsPlugin<T>,
+    ) -> &mut Self {
+        ggrs_plugin.build(self);
+
+        self
     }
 }
